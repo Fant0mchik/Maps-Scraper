@@ -5,5 +5,5 @@ API needed: Places API
 
 To launch:
 -install requirements
--add "GOOGLE_API_KEY" in .end and paste your api key 
+-add "GOOGLE_API_KEY" in .env and paste your api key 
 -launch ASGI server ( /Maps-Scraper uvicorn main:app --reload )
