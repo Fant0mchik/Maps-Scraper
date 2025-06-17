@@ -1,9 +1,16 @@
-Python 3.12.1
+Python version used in project: Python 3.12.1
 
 This project is async webserver on FastAPI, which parses companies from Google Maps and saves data to SQLite db.
 API needed: Places API
 
-To launch:
--install requirements
--add "GOOGLE_API_KEY" in .env and paste your api key 
--launch ASGI server ( /Maps-Scraper uvicorn main:app --reload )
+WARNING!
+Script adds items to database only with unique place_id, which means data will not be updated by newer POST request and can only be updated by erasing db data.
+
+Commands:
+- Install requirements:
+- - pip install -r requirements.txt
+  - Other option:
+    - pip install fastapi uvicorn sqlalchemy
+- Lauch server:
+- - uvicorn main:app --reload
+- 
