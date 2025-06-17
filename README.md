@@ -8,9 +8,9 @@ Script adds items to database only with unique place_id, which means data will n
 
 Commands:
 - Install requirements:
-- - pip install -r requirements.txt
+  - pip install -r requirements.txt
   - Other option:
     - pip install fastapi uvicorn sqlalchemy
 - Lauch server:
-- - uvicorn main:app --reload
-- 
+  - uvicorn main:app --reload
+ 
