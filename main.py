@@ -108,12 +108,17 @@ class CompanyOut(BaseModel):
     fetched_at: str
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # Collector logic ------------------------------------------------------------
 
-def _collect_one_location(db: Session, keyword: str, lat: float, lng: float): #collects info if 1 location
+
+def _collect_one_location(db: Session, keyword: str, lat: float, lng: float):#collects info of 1 location
+    # pull already‑present place_ids once per location call
+    existing = {row[0] for row in db.query(Company.place_id).all()}
+    seen: set[str] = set()
+
     response = client.places_nearby(
         location=(lat, lng), radius=RADIUS_METERS, keyword=keyword
     )
@@ -121,9 +126,10 @@ def _collect_one_location(db: Session, keyword: str, lat: float, lng: float): #c
     while True:
         for place in response.get("results", []):
             pid = place["place_id"]
-            if db.query(Company).filter_by(place_id=pid).first():
-                continue  # deduplicate early
+            if pid in existing or pid in seen:
+                continue  # skip duplicates fast
 
+            # fetch details only for new pids
             details = client.place(
                 place_id=pid,
                 fields=[
@@ -136,26 +142,33 @@ def _collect_one_location(db: Session, keyword: str, lat: float, lng: float): #c
                 ],
             )
             res = details["result"]
-            db.add(
-                Company(
-                    place_id=pid,
-                    name=res.get("name"),
-                    address=res.get("formatted_address"),
-                    phone=res.get("international_phone_number"),
-                    website=res.get("website"),
-                    rating=res.get("rating"),
-                    lat=res.get("geometry", {}).get("location", {}).get("lat"),
-                    lng=res.get("geometry", {}).get("location", {}).get("lng"),
-                    keyword=keyword,
-                    fetched_at=datetime.utcnow().isoformat(timespec="seconds"),
-                )
+
+            company = Company(
+                place_id=pid,
+                name=res.get("name"),
+                address=res.get("formatted_address"),
+                phone=res.get("international_phone_number"),
+                website=res.get("website"),
+                rating=res.get("rating"),
+                lat=res.get("geometry", {}).get("location", {}).get("lat"),
+                lng=res.get("geometry", {}).get("location", {}).get("lng"),
+                keyword=keyword,
+                fetched_at=datetime.utcnow().isoformat(timespec="seconds"),
             )
-        db.commit()
+            db.add(company)
+            seen.add(pid)
+
+            # try to commit immediately; on duplicate (race with another thread)
+            # rollback and ignore
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
 
         token = response.get("next_page_token")
         if not token:
             break
-        time.sleep(REQUEST_DELAY)  # Google: wait a moment for token to activate
+        time.sleep(REQUEST_DELAY)
         response = client.places_nearby(page_token=token)
 
 
