@@ -14,3 +14,7 @@ Commands:
 - Lauch server:
   - uvicorn main:app --reload
  
+Examples of curl requests:
+- GET /companies?size=20&skip=0&keyword=ups
+- GET /companies.csv?size=20&skip=0&keyword=ups
+- POST /collect?keyword=apple
