@@ -1,34 +1,31 @@
 import os
 import time
 import csv
-from datetime import datetime
-from typing import List, Optional
+import sys
+import uuid
+import subprocess
+import argparse
+from datetime import datetime, timezone
+from typing import Optional
 from dotenv import load_dotenv
 import googlemaps
-from fastapi import BackgroundTasks, Body, FastAPI
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 from sqlalchemy import (Column, Float, Integer, String, UniqueConstraint,
                         create_engine)
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import Session, sessionmaker
-import uuid
 from threading import Lock
 from io import StringIO
 
-#Configuration 
+# Configuration
 load_dotenv()
-
 API_KEY = os.getenv("GOOGLE_API_KEY")
-RADIUS_METERS = int(os.getenv("RADIUS_METERS", "50000"))  
-REQUEST_DELAY = float(os.getenv("REQUEST_DELAY", "2.0"))   
+RADIUS_METERS = int(os.getenv("RADIUS_METERS", "50000"))
+REQUEST_DELAY = float(os.getenv("REQUEST_DELAY", "2.0"))
 
 if not API_KEY:
     raise RuntimeError("Set the GOOGLE_API_KEY environment variable first.")
 
-
-# A coarse grid of 65 major US city centres (≈ all states + big metros).
-# Radius = 50 km will cover the continental US with minimal overlap.
+# Locations with coordinates
 LOCATIONS: dict[str,list[tuple[str,float,float]]] = {
     "AL": [("Birmingham", 33.543682, -86.779633)],
     "AK": [("Anchorage", 61.217381, -149.863129)],
@@ -49,7 +46,7 @@ LOCATIONS: dict[str,list[tuple[str,float,float]]] = {
     "ID": [("Boise", 43.6150, -116.2023)],
     "IL": [
         ("Chicago", 41.8781, -87.6298),
-        ("Springfield", 39.7817, -89.6501),  # важливе місто-столиця як уточнення
+        ("Springfield", 39.7817, -89.6501),  
     ],
     "IN": [("Indianapolis", 39.7684, -86.1581)],
     "IA": [("Des Moines", 41.5868, -93.6250)],
@@ -61,7 +58,7 @@ LOCATIONS: dict[str,list[tuple[str,float,float]]] = {
     "MA": [("Boston", 42.3601, -71.0589)],
     "MI": [
         ("Detroit", 42.3314, -83.0458),
-        ("Cleveland", 41.505493, -81.681290),  # хоча він в OH, раніше не включений
+        ("Cleveland", 41.505493, -81.681290),  
     ],
     "MN": [("Minneapolis", 44.9778, -93.2650)],
     "MS": [("Jackson", 32.2988, -90.1848)],
@@ -116,19 +113,13 @@ LOCATIONS: dict[str,list[tuple[str,float,float]]] = {
     "WY": [("Cheyenne", 41.1400, -104.8202)],
 }
 
-
-
-
-#DB setup
+# DB setup
 Base = declarative_base()
 engine = create_engine("sqlite:///companies.db", echo=False, future=True)
 SessionLocal = sessionmaker(engine, expire_on_commit=False, class_=Session)
 
-
-
 class Company(Base):
     __tablename__ = "companies"
-
     id = Column(Integer, primary_key=True)
     place_id = Column(String, unique=True, index=True)
     name = Column(String)
@@ -141,72 +132,28 @@ class Company(Base):
     keyword = Column(String)
     fetched_at = Column(String)
     state = Column(String)
-
-    __table_args__ = (
-        UniqueConstraint("place_id", name="uix_place"),
-    )
-
+    __table_args__ = (UniqueConstraint("place_id", name="uix_place"),)
 
 Base.metadata.create_all(bind=engine)
 
-# Google API client -----------------------------------------------------------
+# Google API client
 client = googlemaps.Client(key=API_KEY)
 
-
-# FastAPI --------------------------------------------------------------------
-app = FastAPI(title="US Logistics Companies Collector")
-
-
-class CompanyOut(BaseModel):
-    id: int
-    place_id: str
-    name: str | None
-    address: str | None
-    phone: str | None
-    website: str | None
-    rating: float | None
-    lat: float | None
-    lng: float | None
-    keyword: str
-    fetched_at: str
-    state: str | None  # <-- Додаємо поле
-
-    class Config:
-        from_attributes = True
-
-
-# Collector logic ------------------------------------------------------------
-
-
-def _collect_one_location(db: Session, keyword: str, lat: float, lng: float, state: str | None = None):
-    existing = set()
-    for row in db.query(Company.place_id).yield_per(500):
-        existing.add(row[0])
+# Collector
+def _collect_one_location(db: Session, keyword: str, lat: float, lng: float, state: Optional[str]=None):
+    existing = {row[0] for row in db.query(Company.place_id).yield_per(500)}
     seen: set[str] = set()
-
-    response = client.places_nearby(
-        location=(lat, lng), radius=RADIUS_METERS, keyword=keyword
-    )
-
+    response = client.places_nearby(location=(lat, lng), radius=RADIUS_METERS, keyword=keyword)
     while True:
         for place in response.get("results", []):
             pid = place["place_id"]
             if pid in existing or pid in seen:
-                continue  # skip duplicates fast
-
-            details = client.place(
-                place_id=pid,
-                fields=[
-                    "name",
-                    "formatted_address",
-                    "international_phone_number",
-                    "website",
-                    "rating",
-                    "geometry",
-                ],
-            )
+                continue
+            details = client.place(place_id=pid, fields=[
+                "name", "formatted_address", "international_phone_number",
+                "website", "rating", "geometry",
+            ])
             res = details["result"]
-
             company = Company(
                 place_id=pid,
                 name=res.get("name"),
@@ -217,123 +164,155 @@ def _collect_one_location(db: Session, keyword: str, lat: float, lng: float, sta
                 lat=res.get("geometry", {}).get("location", {}).get("lat"),
                 lng=res.get("geometry", {}).get("location", {}).get("lng"),
                 keyword=keyword,
-                fetched_at=datetime.utcnow().isoformat(timespec="seconds"),
-                state=state, 
+                fetched_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                state=state,
             )
             db.add(company)
             seen.add(pid)
-
             try:
                 db.commit()
             except Exception:
                 db.rollback()
-
         token = response.get("next_page_token")
         if not token:
             break
         time.sleep(REQUEST_DELAY)
         response = client.places_nearby(page_token=token)
 
-def collect_companies(keyword, states: str | None = None):
+def collect_companies(keyword: str, states: Optional[str]=None):
     db = SessionLocal()
     try:
-        if states is None:
-            locations = LOCATIONS.items()
-        else:
-            if states in LOCATIONS:
-                locations = [(states, LOCATIONS[states])]
-            else:
-                locations = []  # Якщо штату немає в LOCATIONS, нічого не робимо
+        locations = LOCATIONS.items() if states is None else ([(states, LOCATIONS.get(states, []))])
         for state, coords in locations:
             for city, lat, lng in coords:
                 _collect_one_location(db, keyword, lat, lng, state)
     finally:
         db.close()
 
-
-# Глобальний реєстр задач
+# CLI and background spawn
 collector_tasks: dict[str, "CollectorTask"] = {}
 collector_tasks_lock = Lock()
 
 class CollectorTask:
-    def __init__(self, keyword: str, states: str | None = None):
+    def __init__(self, keyword: str, states: Optional[str]=None):
         self.id = str(uuid.uuid4())
         self.keyword = keyword
         self.states = states
         self.status = "in progress"
 
     def run(self):
+        """
+        Runs the collection task.
+        """
+        start_time = time.time()
         try:
             collect_companies(self.keyword, self.states)
             self.status = "done"
         except Exception:
-            print(f"Exception occured: {Exception.with_traceback()}")
             self.status = "failed"
+        self.elapsed = time.time() - start_time
 
-# API routes -----------------------------------------------------------------
-
-# POST endpoint для запуску збору
-@app.post("/collect", summary="Start background data‑harvest")
-async def trigger_collection(
-    bg: BackgroundTasks,
-    keyword: str = None,
-    states: str | None = None
-):
-    task = CollectorTask(keyword, states)
-    with collector_tasks_lock:
-        collector_tasks[task.id] = task
-    bg.add_task(task.run)
-    return {"task_id": task.id}
-
-# GET endpoint для перевірки статусу
-@app.get("/collect/status/{task_id}")
-def get_collection_status(task_id: str):
-    with collector_tasks_lock:
-        task = collector_tasks.get(task_id)
-    if not task:
-        return {"status": "not found"}
-    return {"task_id": task.id, "status": task.status}
-
-@app.get("/companies", response_model=List[CompanyOut])
-def list_companies(
-    size: int = 20,
-    skip: int = 0,
-    keyword: str | None = None,
-    state: str | None = None,
-):
+def export_companies_to_csv(filename: str, size: int=1000, skip: int=0, keyword: Optional[str]=None, state: Optional[str]=None):
     with SessionLocal() as db:
         query = db.query(Company)
-        if keyword is not None:
+        if keyword:
             query = query.filter(Company.keyword == keyword)
-        if state is not None:
-            query = query.filter(Company.state == state)
-        return query.offset(size * skip).limit(size).all()
-
-@app.get("/companies.csv")
-def companies_csv(
-    size: int = 1000,
-    skip: int = 0,
-    keyword: str | None = None,
-    state: str | None = None,
-):
-    with SessionLocal() as db:
-        query = db.query(Company)
-        if keyword is not None:
-            query = query.filter(Company.keyword == keyword)
-        if state is not None:
+        if state:
             query = query.filter(Company.state == state)
         companies = query.offset(size * skip).limit(size).all()
-
-        output = StringIO()
-        writer = csv.writer(output)
-        writer.writerow([
-            "id", "place_id", "name", "address", "phone", "website",
-            "rating", "lat", "lng", "keyword", "fetched_at", "state"
-        ])
-        for c in companies:
+        with open(filename, "w", newline='', encoding="utf-8") as f:
+            writer = csv.writer(f)
             writer.writerow([
-                c.id, c.place_id, c.name, c.address, c.phone, c.website,
-                c.rating, c.lat, c.lng, c.keyword, c.fetched_at, c.state
+                "id", "place_id", "name", "address", "phone",
+                "website", "rating", "lat", "lng",
+                "keyword", "fetched_at", "state"
             ])
-        output.seek(0)
-        return StreamingResponse(output, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=companies.csv"})
+            for c in companies:
+                writer.writerow([
+                    c.id, c.place_id, c.name, c.address,
+                    c.phone, c.website, c.rating,
+                    c.lat, c.lng, c.keyword,
+                    c.fetched_at, c.state
+                ])
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(description="Google Maps Collector CLI")
+    subparsers = parser.add_subparsers(dest="command")
+
+    # collect: spawn background process
+    collect_parser = subparsers.add_parser("collect", help="Start collection in background")
+    collect_parser.add_argument("keyword", type=str)
+    collect_parser.add_argument("--state", type=str, default=None)
+
+    # list and export remain synchronous for simplicity
+    list_parser = subparsers.add_parser("list", help="List companies")
+    list_parser.add_argument("--size", type=int, default=20)
+    list_parser.add_argument("--skip", type=int, default=0)
+    list_parser.add_argument("--keyword", type=str, default=None)
+    list_parser.add_argument("--state", type=str, default=None)
+
+    export_parser = subparsers.add_parser("export", help="Export to CSV")
+    export_parser.add_argument("--filename", type=str, default="companies.csv")
+    export_parser.add_argument("--size", type=int, default=1000)
+    export_parser.add_argument("--skip", type=int, default=0)
+    export_parser.add_argument("--keyword", type=str, default=None)
+    export_parser.add_argument("--state", type=str, default=None)
+
+    # hidden internal command to actually run collection
+    run_parser = subparsers.add_parser("_run_collect", help=argparse.SUPPRESS)
+    run_parser.add_argument("task_id", type=str)
+    run_parser.add_argument("keyword", type=str)
+    run_parser.add_argument("--state", type=str, default=None)
+
+    args = parser.parse_args()
+
+    if args.command == "collect":
+        # Start collection in a background process
+        task = CollectorTask(args.keyword, args.state)
+        log_file = f"{task.id}.log"
+        cmd = [sys.executable, __file__, "_run_collect", task.id, args.keyword]
+        if args.state:
+            cmd += ["--state", args.state]
+        with open(log_file, "w", encoding="utf-8") as lf:
+            lf.write(f"Task {task.id} started at {datetime.now(timezone.utc).isoformat(timespec='seconds')}\n")
+        subprocess.Popen(cmd, stdout=open(log_file, "a", encoding="utf-8"), stderr=subprocess.STDOUT, close_fds=True)
+        print(f"Collection started in background. Task ID: {task.id}")
+        print(f"Logs: {log_file}")
+
+    elif args.command == "_run_collect":
+        # Run the collection task (used internally)
+        task = CollectorTask(args.keyword, args.state)
+        task.id = args.task_id
+        start_time = time.time()
+        task.run()
+        elapsed = getattr(task, "elapsed", time.time() - start_time)
+        with open(f"{task.id}.log", "a", encoding="utf-8") as lf:
+            lf.write(f"Task {task.id} finished with status: {task.status} in {elapsed:.2f} seconds\n")
+        print(f"Task {task.id} finished with status: {task.status} in {elapsed:.2f} seconds")
+
+    elif args.command == "list":
+        from sqlalchemy.orm import Session
+        from sqlalchemy.orm import Session
+        with SessionLocal() as db:
+            query = db.query(Company)
+            if args.keyword:
+                query = query.filter(Company.keyword == args.keyword)
+            if args.state:
+                query = query.filter(Company.state == args.state)
+            companies = query.offset(args.size * args.skip).limit(args.size).all()
+            for c in companies:
+                print(f"{c.id}: {c.name} ({c.address}) [{c.state}]")
+
+    elif args.command == "export":
+        export_companies_to_csv(
+            filename=args.filename,
+            size=args.size,
+            skip=args.skip,
+            keyword=args.keyword,
+            state=args.state
+        )
+        print(f"CSV saved to {args.filename}")
+
+    else:
+        parser.print_help()

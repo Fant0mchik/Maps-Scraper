@@ -1,4 +1,7 @@
 .env
 venv/
 .venv/
-companies.db
+.export/
+export/
+*.db
+*.log
