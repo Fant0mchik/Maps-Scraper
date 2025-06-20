@@ -1,6 +1,6 @@
 # 📍 Google Maps Collector CLI
 
-This project is a dual-language guide for using the Google Maps Company Collector via the command line interface.
+Dual-language project guide for using the Google Maps Places Collector via the command line interface.
 
 ---
 
@@ -13,6 +13,7 @@ This project is a dual-language guide for using the Google Maps Company Collecto
 - 🔄 Asynchronous background data collection (`collect`)
 - 📄 Export collected companies to a CSV file (`export`)
 - 📋 List companies in terminal (`list`)
+- 📩 Collect and export to CSV file(`process`)
 - 🧪 Store and deduplicate results in SQLite DB (`companies.db`)
 
 ---
@@ -95,6 +96,29 @@ python parser.py export [--filename <file.csv>] [--size <N>] [--skip <M>] [--key
 python parser.py export --filename tx_logistics.csv --keyword logistics --state TX
 ```
 
+#### 4. Collect and Export in One Step
+
+Collects data and immediately saves it to a CSV file.
+
+```bash
+python parser.py process <keyword> [--state <STATE>] [--filename <file.csv>] [--size <N>] [--skip <M>]
+```
+
+- `<keyword>` — search keyword (e.g., `logistics`)
+
+- `--state` — two-letter state abbreviation (optional)
+
+- `--filename` — name of output file (default: `companies.csv`)
+
+- `--size` — number of results to export
+
+- `--skip` — number of result pages to skip (`skip`=1 skips the first size entries)
+
+**Example:**
+
+```bash
+python parser.py process logistics --state FL --filename fl_logistics.csv --size 500 --skip 1
+```
 ---
 
 ## 🇺🇦 Українська
@@ -106,6 +130,7 @@ python parser.py export --filename tx_logistics.csv --keyword logistics --state 
 - 🔄 Збір даних у фоні (`collect`)
 - 📄 Експорт у CSV-файл (`export`)
 - 📋 Вивід у консоль (`list`)
+- 📩 Збір та експорт у CSV-файл(`process`)
 - 🧪 Уникнення дублікатів у базі (`companies.db`)
 
 ---
@@ -136,6 +161,7 @@ python parser.py collect <keyword> [--state <STATE>]
 ```
 
 - `<keyword>` — ключове слово для пошуку (наприклад: `logistics`).
+
 - `--state` — необов’язковий параметр зі скороченням штату (наприклад: `NY`, `CA`). Якщо не вказано — збір по всіх штатах.
 
 **Приклад:**
@@ -145,6 +171,7 @@ python parser.py collect logistics --state TX
 ```
 
 - Після запуску буде виведено Task ID та ім’я лог-файлу (наприклад: `abcd1234.log`).
+
 - Логи роботи можна переглядати в цьому файлі.
 
 #### 2. Вивід списку компаній
@@ -156,8 +183,11 @@ python parser.py list [--size <N>] [--skip <M>] [--keyword <KEY>] [--state <STAT
 ```
 
 - `--size` — кількість записів на сторінку (за замовчуванням `20`).
+
 - `--skip` — номер сторінки (за замовчуванням `0`).
+
 - `--keyword` — фільтр по ключевому слову.
+
 - `--state` — фільтр по штату.
 
 **Приклад:**
@@ -175,6 +205,8 @@ python parser.py export [--filename <file.csv>] [--size <N>] [--skip <M>] [--key
 ```
 
 - `--filename` — ім’я вихідного файлу (за замовчуванням `companies.csv`).
+  - Може бути експортовано в папку: `<directory>\\<filename>.csv` (*Приклад*: `export\\companies.csv`)
+
 - `--size`, `--skip`, `--keyword`, `--state` — такі ж опції, як у `list`.
 
 **Приклад:**
@@ -183,4 +215,27 @@ python parser.py export [--filename <file.csv>] [--size <N>] [--skip <M>] [--key
 python parser.py export --filename tx_logistics.csv --keyword logistics --state TX
 ```
 
+#### 4. Збір і експорт в одному кроці
+
+Збирає дані та одразу зберігає їх у CSV-файл.
+
+```bash
+python parser.py process <keyword> [--state <STATE>] [--filename <file.csv>] [--size <N>] [--skip <M>]
+```
+
+- `<keyword>` — ключове слово пошуку (наприклад, `logistics`)
+
+- `--state` — дволітерне скорочення штату (необов’язково)
+
+- `--filename` — ім’я вихідного файлу (за замовчуванням `companies.csv`)
+
+- `--size` — кількість результатів для експорту
+
+- `--skip` — кількість сторінок результатів, які треба пропустити (`skip`=1 пропускає перші size записів)
+
+**Приклад:**
+
+```bash
+python parser.py process logistics --state FL --filename fl_logistics.csv --size 500 --skip 1
+```
 ---
