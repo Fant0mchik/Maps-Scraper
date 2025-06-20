@@ -36,17 +36,17 @@ This project is a dual-language guide for using the Google Maps Company Collecto
 
 #### 1. Start data collection in the background
 
-The task runs in the background and logs are written to '<task_id>.log'.
+The task runs in the background and logs are written to <task_id>.log.
 
 ```bash
 python parser.py collect <keyword> [--state <STATE>]
 ```
 
-- '<keyword>' — search term (e.g., 'logistics', 'transport')
+- `<keyword>` — search term (e.g., `logistics`, `transport`)
 
-- '--state' — optional two-letter US state abbreviation (e.g., 'NY', 'CA')
+- `--state` — optional two-letter US state abbreviation (e.g., `NY`, `CA`)
 
-- If '--state' is not provided, it collects from all major cities across all states.
+- If `--state` is not provided, it collects from all major cities across all states.
 
 **Example:**
 
@@ -62,13 +62,13 @@ Returns exacts number of results (without websites).
 python parser.py list [--size <N>] [--skip <M>] [--keyword <KEY>] [--state <STATE>]
 ```
 
-- '--size' — number of results per page (default: 20)
+- `--size` — number of results per page (default: `20`)
 
-- '--skip' — number of pages to skip (default: 0)
+- `--skip` — number of pages to skip (default: `0`)
 
-- '--keyword' — filter by search keyword
+- `--keyword` — filter by search keyword
 
-- '--state' — filter by state
+- `--state` — filter by state
 
 **Example:**
 
@@ -84,10 +84,10 @@ Exports collected data to .csv file.
 python parser.py export [--filename <file.csv>] [--size <N>] [--skip <M>] [--keyword <KEY>] [--state <STATE>]
 ```
 
-- '--filename' — output file name (default: companies.csv)
-  - Can be exported into a folder: '<directory>\\<filename>.csv' (*example*: 'export\\companies.csv')
+- `--filename` — output file name (default: `companies.csv`)
+  - Can be exported into a folder: `<directory>\\<filename>.csv` (*example*: `export\\companies.csv`)
 
-- Other parameters are same as in 'list'
+- Other parameters are same as in `list`
 
 **Example:**
 
@@ -155,8 +155,8 @@ python parser.py collect logistics --state TX
 python parser.py list [--size <N>] [--skip <M>] [--keyword <KEY>] [--state <STATE>]
 ```
 
-- `--size` — кількість записів на сторінку (за замовчуванням 20).
-- `--skip` — номер сторінки (за замовчуванням 0).
+- `--size` — кількість записів на сторінку (за замовчуванням `20`).
+- `--skip` — номер сторінки (за замовчуванням `0`).
 - `--keyword` — фільтр по ключевому слову.
 - `--state` — фільтр по штату.
 

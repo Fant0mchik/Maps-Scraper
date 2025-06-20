@@ -302,6 +302,16 @@ if __name__ == "__main__":
     export_parser.add_argument("--keyword", type=str, default=None)
     export_parser.add_argument("--state", type=str, default=None)
 
+    process_parser = subparsers.add_parser(
+        "process",
+        help="Collect data and immediately export to CSV",
+    )
+    process_parser.add_argument("keyword", type=str)
+    process_parser.add_argument("--state", type=str, default=None)
+    process_parser.add_argument("--filename", type=str, default="companies.csv")
+    process_parser.add_argument("--size", type=int, default=1000)
+    process_parser.add_argument("--skip", type=int, default=0)
+    
     args = parser.parse_args()
 
     if args.command == "collect":
@@ -326,6 +336,15 @@ if __name__ == "__main__":
             state=args.state
         )
         print(f"CSV saved to {args.filename}")
-
+    elif args.command == "process":
+        run_collector_in_thread(args.keyword, args.state)
+        export_companies_to_csv(
+            filename=args.filename,
+            size=args.size,
+            skip=args.skip,
+           keyword=args.keyword,
+            state=args.state,
+        )
+        print(f"Collection complete and CSV saved to {args.filename}")
     else:
         parser.print_help()
