@@ -15,6 +15,8 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import Session, sessionmaker
 from threading import Lock
 from io import StringIO
+import threading
+import traceback
 
 # Configuration
 load_dotenv()
@@ -179,12 +181,20 @@ def _collect_one_location(db: Session, keyword: str, lat: float, lng: float, sta
         time.sleep(REQUEST_DELAY)
         response = client.places_nearby(page_token=token)
 
-def collect_companies(keyword: str, states: Optional[str]=None):
+def collect_companies(keyword: str, states: Optional[str]=None, task_id: Optional[str]=None):
     db = SessionLocal()
     try:
-        locations = LOCATIONS.items() if states is None else ([(states, LOCATIONS.get(states, []))])
+        if states is None:
+            locations = LOCATIONS.items()
+        else:
+            coords = LOCATIONS.get(states)
+            if not coords:
+                log_status(task_id, f"State '{states}' not found in LOCATIONS or has no cities.")
+                return
+            locations = [(states, coords)]
         for state, coords in locations:
             for city, lat, lng in coords:
+                log_status(task_id, f"Collecting for {city}, {state}") 
                 _collect_one_location(db, keyword, lat, lng, state)
     finally:
         db.close()
@@ -208,8 +218,9 @@ class CollectorTask:
         try:
             collect_companies(self.keyword, self.states)
             self.status = "done"
-        except Exception:
-            self.status = "failed"
+        except Exception as e:
+            self.status = f"failed: {str(e)}" 
+            return
         self.elapsed = time.time() - start_time
 
 def export_companies_to_csv(filename: str, size: int=1000, skip: int=0, keyword: Optional[str]=None, state: Optional[str]=None):
@@ -228,19 +239,51 @@ def export_companies_to_csv(filename: str, size: int=1000, skip: int=0, keyword:
                 "keyword", "fetched_at", "state"
             ])
             for c in companies:
-                writer.writerow([
+                row = [
                     c.id, c.place_id, c.name, c.address,
                     c.phone, c.website, c.rating,
                     c.lat, c.lng, c.keyword,
                     c.fetched_at, c.state
-                ])
+                ]
+
+                row = ["NULL" if v is None else v for v in row]
+                writer.writerow(row)
+
+def log_status(task_id: str, message: str):
+    log_file = f"{task_id}.log"
+    #print(message, flush=True)
+    with open(log_file, "a", encoding="utf-8") as lf:
+        lf.write(message + "\n")
+
+def run_collector_in_thread(keyword: str, state: Optional[str]=None):
+    task = CollectorTask(keyword, state)
+    print(f"Collection started in background thread. Task ID: {task.id}")
+    print(f"Logs: {task.id}.log")
+    log_status(task.id, f"Task {task.id} started at {datetime.now(timezone.utc).isoformat(timespec='seconds')}")
+    def target():
+        start_time = time.time()
+        try:
+            log_status(task.id, f"Collecting for keyword='{task.keyword}' state='{task.states}'")
+            collect_companies(task.keyword, task.states, task.id)
+            task.status = "done"
+        except Exception as e:
+            tb = traceback.format_exc()
+            log_status(task.id, f"FAILED: {str(e)}\n{tb}")
+            task.status = f"failed: {str(e)}"
+        finally:
+            elapsed = time.time() - start_time
+            log_status(task.id, f"Task {task.id} finished with status: {task.status} in {elapsed:.2f} seconds")
+    thread = threading.Thread(target=target)
+    thread.start()
+    thread.join()  
+    return task.id
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Google Maps Collector CLI")
     subparsers = parser.add_subparsers(dest="command")
 
-    # collect: spawn background process
+    # collect: spawn background thread
     collect_parser = subparsers.add_parser("collect", help="Start collection in background")
     collect_parser.add_argument("keyword", type=str)
     collect_parser.add_argument("--state", type=str, default=None)
@@ -259,41 +302,11 @@ if __name__ == "__main__":
     export_parser.add_argument("--keyword", type=str, default=None)
     export_parser.add_argument("--state", type=str, default=None)
 
-    # hidden internal command to actually run collection
-    run_parser = subparsers.add_parser("_run_collect", help=argparse.SUPPRESS)
-    run_parser.add_argument("task_id", type=str)
-    run_parser.add_argument("keyword", type=str)
-    run_parser.add_argument("--state", type=str, default=None)
-
     args = parser.parse_args()
 
     if args.command == "collect":
-        # Start collection in a background process
-        task = CollectorTask(args.keyword, args.state)
-        log_file = f"{task.id}.log"
-        cmd = [sys.executable, __file__, "_run_collect", task.id, args.keyword]
-        if args.state:
-            cmd += ["--state", args.state]
-        with open(log_file, "w", encoding="utf-8") as lf:
-            lf.write(f"Task {task.id} started at {datetime.now(timezone.utc).isoformat(timespec='seconds')}\n")
-        subprocess.Popen(cmd, stdout=open(log_file, "a", encoding="utf-8"), stderr=subprocess.STDOUT, close_fds=True)
-        print(f"Collection started in background. Task ID: {task.id}")
-        print(f"Logs: {log_file}")
-
-    elif args.command == "_run_collect":
-        # Run the collection task (used internally)
-        task = CollectorTask(args.keyword, args.state)
-        task.id = args.task_id
-        start_time = time.time()
-        task.run()
-        elapsed = getattr(task, "elapsed", time.time() - start_time)
-        with open(f"{task.id}.log", "a", encoding="utf-8") as lf:
-            lf.write(f"Task {task.id} finished with status: {task.status} in {elapsed:.2f} seconds\n")
-        print(f"Task {task.id} finished with status: {task.status} in {elapsed:.2f} seconds")
-
+        task_id = run_collector_in_thread(args.keyword, args.state)
     elif args.command == "list":
-        from sqlalchemy.orm import Session
-        from sqlalchemy.orm import Session
         with SessionLocal() as db:
             query = db.query(Company)
             if args.keyword:
